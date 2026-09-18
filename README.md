@@ -1,39 +1,44 @@
 # DDPM from Scratch
 
-A pure PyTorch implementation of **Denoising Diffusion Probabilistic Models**
-([Ho, Jain & Abbeel, 2020](https://arxiv.org/abs/2006.11239)), built step by step
-with no diffusion libraries — only `torch` and `torch.nn.functional`.
+Implements the Denoising Diffusion Probabilistic Model
+([Ho et al., 2020](https://arxiv.org/abs/2006.11239)) in pure PyTorch: linear
+noise schedules, closed-form forward sampling, the simplified noise-prediction
+loss, a tiny time-conditioned denoiser, ancestral DDPM sampling, and an
+end-to-end experiment on synthetic blob images that beats a pure-noise
+baseline. No diffusion libraries, no pretrained components — every piece is
+built directly from the paper's equations using only `torch` and
+`torch.nn.functional`.
 
-## What's implemented
+## Components
 
-- **Forward diffusion schedule** — linear β schedule, α/ᾱ derivations, and the
-  closed-form forward process `q(x_t | x_0)` that jumps straight to any noise
-  level without simulating each intermediate step.
-- **Simplified training objective** — the noise-prediction loss `L_simple`
-  (MSE between the true noise and the model's predicted noise).
-- **Tiny time-conditioned denoiser** — sinusoidal timestep embeddings (à la
-  Transformer positional encodings) feeding a compact residual CNN that
-  predicts noise `ε` from a noisy image and its timestep.
-- **Ancestral DDPM sampler** — the reverse process: `x0` prediction from `ε`,
-  the reverse-process posterior mean/variance, and the full sampling loop
-  from pure noise down to `t = 0`.
-- **Synthetic experiment** — a toy dataset of bright disks ("blobs") on a
-  black background, trained end-to-end, then evaluated by comparing
-  generated samples against a pure-noise baseline.
+- **Forward diffusion schedule** — linear β schedule with derived α/ᾱ terms,
+  and a closed-form implementation of `q(x_t | x_0)` that samples any noise
+  level in a single step, without simulating the chain.
+- **Noise-prediction training objective** — the simplified DDPM loss
+  `L_simple`, formulated as MSE between the true and predicted noise.
+- **Time-conditioned denoising network** — a compact residual CNN with
+  sinusoidal timestep embeddings (Transformer-style positional encoding)
+  injected into its feature maps, predicting the noise component `ε`.
+- **Ancestral sampler** — the full reverse process: `x0` reconstruction from
+  a noise prediction, the reverse-process posterior mean/variance, and the
+  iterative sampling loop from pure Gaussian noise down to a generated image.
+- **End-to-end validation** — a synthetic blob-image dataset used to train
+  the model and confirm the pipeline works: generated samples are scored
+  against a nearest-neighbor metric and shown to significantly outperform a
+  pure-noise baseline.
 
-## Why this approach works
+## Approach
 
 Diffusion models learn to reverse a gradual noising process. Rather than
 simulating that forward process step by step, DDPM derives a closed-form
-shortcut: `x_t = sqrt(ᾱ_t) · x0 + sqrt(1 − ᾱ_t) · ε`, letting you sample any
-noise level in one shot. Instead of training a network to predict the clean
-image directly, DDPM trains it to predict the *noise* `ε` that was added —
-this reparameterization is simpler to optimize and is what makes the
-"simplified" loss (`L_simple`) just a plain MSE. Sampling then walks that
-process backward: starting from pure Gaussian noise, the model's noise
-prediction is used to estimate the current best guess of the clean image,
-which in turn defines a Gaussian to sample the next, slightly cleaner image
-from — repeated for every timestep down to zero.
+shortcut — `x_t = sqrt(ᾱ_t) · x0 + sqrt(1 − ᾱ_t) · ε` — that samples any
+noise level directly. Instead of predicting the clean image, the network is
+trained to predict the *noise* `ε` that was added; this reparameterization is
+what reduces the objective to a simple MSE. Sampling reverses the process:
+starting from pure Gaussian noise, each step uses the model's noise
+prediction to estimate the current best guess of the clean image, which
+defines a Gaussian to sample the next, less noisy image from — repeated
+across every timestep down to zero.
 
 ## How it fits together
 
@@ -90,12 +95,10 @@ graph TD
 
 ## Project layout
 
-Everything lives in two files, matching the original step-by-step solutions:
-
 ```
-model.py      # all 20 building blocks: schedule, loss, tiny CNN, dataset,
-              # training loop, sampler, evaluation metric, full experiment
-scaffold.py   # imports model.py and runs the end-to-end experiment
+model.py      # schedule, loss, denoising network, dataset, training loop,
+              # sampler, evaluation metric, and the full experiment
+scaffold.py   # runs the end-to-end experiment
 ```
 
 ## Running it
@@ -120,10 +123,15 @@ closer (in nearest-neighbor MSE) to the real blob dataset than raw Gaussian
 noise does — evidence the reverse process has actually learned the data
 manifold, even from this deliberately tiny model and short training run.
 
-## Notes
+Training loss over a longer run (`python plot_loss.py`):
 
-This is intentionally minimal: 8×8 grayscale images, a single-block residual
-CNN (no multi-scale U-Net, no attention), and tens — not thousands — of
-training steps. It's meant to make every piece of the DDPM math legible in
-code, not to produce high-fidelity samples. Scaling up `hidden`, `num_steps`,
-and `T` in `ddpm_experiment` improves results at the cost of runtime.
+![DDPM training loss](loss_curve.png)
+
+## Scope
+
+Deliberately minimal by design: 8×8 grayscale images, a single-block residual
+CNN (no multi-scale U-Net, no attention), and a short training run — enough
+to validate every stage of the DDPM pipeline without the runtime cost of a
+production-scale model. `hidden`, `num_steps`, and `T` in `ddpm_experiment`
+are exposed as parameters and scale directly to larger images and longer
+training.
